@@ -1,0 +1,20 @@
+{
+    "name": "rodriguezric/func-framework",
+    "description": "A small framework based on functions.",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Ricardo Rodriguez",
+            "email": "rodriguez.ric@gmail.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Rodriguezric\\": "src/"
+        },
+        "files": [
+            "src/Corto/functions.php"
+        ]
+    },
+    "require": {}
+}
