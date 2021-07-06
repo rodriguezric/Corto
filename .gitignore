@@ -1,0 +1,4 @@
+vendor/*
+.#*
+.ac-php-conf.json
+public/*

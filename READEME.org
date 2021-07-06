@@ -1,0 +1,213 @@
+#+title: Corto
+#+author: Ricardo Rodriguez
+#+OPTIONS: toc:nil
+
+* Synopsis
+  Corto is a microframework for building REST APIs. The philosophy for this
+  framework is built around using functions, singletons and static calls to
+  objects to replace dependencies on global variables. This framework does
+  not attempt to make a large, object-oriented solution, rather, an
+  opinionated approach to chaining functions from requests.
+  
+* Classes
+  There are two classes in this framework: ~Request~ and ~Pipe~. Everything
+  else is a function.
+
+** Request
+   The ~Request~ object is a singleton that extracts the URI and HTTP
+   method from the ~#$_SERVER~ global variable, and converts ~php://input~
+   into an array.  It expects the input to be ~JsonSerializable~.
+
+** Pipe
+   The ~Pipe~ is an invokable object is has a ~mixed~ property called ~$value~.
+   Invoking the object returns a ~callable~ that mutates ~$value~ and then
+   returns ~$this~. This allows to create a succinct syntax for piping
+   functions on a value:
+
+   #+begin_src php
+     (new Pipe(10))
+         (fn($x) => $x * 2);
+
+     // returns 20
+   #+end_src
+
+* Functions
+  Corto is built around a workflow of functions:
+  * ~request~ for retrieving request data.
+  * ~route~ for listening to HTTP requests, parses paths and returning responses.
+  * ~response~ for setting the HTTP code and returning JSON.
+
+** request
+   Calling ~request()~ returns the ~Request~ singleton. When creating a
+   function ~request()->input~ is used for accessing the data sent.
+
+** route
+   The ~route~ function is the most complex in the framework.  It's a curried
+   function that starts by describing the HTTP method:
+
+   #+begin_src php
+     route('GET');
+   #+end_src
+
+   This returns a function that accepts two parameters: the path and the callback.
+   Paths are strings that are compared to the URI of the request. There are two
+   types of paths: ~literal paths~ and ~variable paths~.
+
+*** Literal Paths
+    Literal paths have no variables included and are compared directly with
+    the URI. An example of a literal path is ~/path/to/resource~.
+
+    #+begin_src php
+      route('GET')('/path/to/resource', ...);
+    #+end_src
+
+
+*** Variable Paths
+    Variable paths include curly braces to represent values to path to the
+    callback function. Variable paths are converted to regular expressions
+    before being compared to the URI. An example of a variable path is
+    ~/path/to/resource/{variable}~
+    
+    #+begin_src php
+      route('GET')('/path/to/resource/{variable}', ...);
+    #+end_src
+    
+    *Note* the word between the curly braces is meaningless, any word between
+    the braces can be used to represent that value. If there are more than
+    one variable included in a variable path they are passed to the callback
+    *in order*.
+    
+
+    
+** response
+   The response function is a curried function that starts with the HTTP response code.
+   The callable returned by the function expect either =array= or =JsonSerializable= data.
+   It sets the HTTP response code and then converts the data into JSON, echoing the
+   JSON format. After the echo is complete, it =exits=.
+
+   This function is tightly coupled to JSON output and also terminates the program.
+   I am comfortable with these decisions, keeping the framework strictly defined
+   for one purpose: =delivering JSON responses based on requests=.
+   
+* Example
+  Here is an example of how to implement the features described in the =Functions= section.
+  This would go in your public-facing script, like =index.php=
+
+  #+begin_src php
+    <?php declare(strict_types=1);
+
+    include __DIR__ . "/../vendor/autoload.php";
+
+    use function Rodriguezric\Corto\{route, route_chain, response, request};
+
+    set_exception_handler(
+        function($exception) {
+            file_put_contents("php://stderr", $exception->getMessage());
+
+            return response(400)(['error' => 'Exception thrown.']);
+        }
+    );
+
+    $hello = fn() => response(200)(['message' => 'Hello']);
+
+    route('GET')('/', $hello);
+
+    $create_person = function() {
+        if (request()->is_missing('name')) {
+            return response(400)(['error' => 'Missing arguments']);
+        }
+
+        $name = request()->input['name'];
+
+        return response(200)(['message' => "Created new person with name {$name}"]);
+    };
+
+    route('POST')('/person', $create_person);
+
+    $update_person = fn($id) => response(200)(['message' => "Updated person with id: {$id}"]);
+
+    route('PUT')('/person/{id}', $update_person);
+
+    response(400)(['message' => 'Resource not found.']);
+  #+end_src
+
+  I'll explain some pieces of the example to elaborate on their purpose.
+
+** Exception Handling
+  #+begin_src php
+    set_exception_handler(
+        function($exception) {
+            file_put_contents("php://stderr", $exception->getMessage());
+
+            return response(400)(['error' => 'Exception thrown.']);
+        }
+    );
+  #+end_src
+
+  This piece will send a 400 response to the requestor with a JSON response:
+
+  #+begin_src json
+    {
+        "error": "Expcetion thrown."
+    }
+  #+end_src
+
+  Meanwhile, on the server it will send the actual exception message to
+  standard error. I separate the two so I can view the error in my
+  container log, give a response to the requestor that let's them know
+  there was an error but still hide the details from them.
+
+** Request Examples
+*** GET
+   #+begin_src php
+     $hello = fn() => response(200)(['message' => 'Hello']);
+
+     route('GET')('/', $hello);
+   #+end_src
+
+   This section sets up a simple =GET= request and passes a function as
+   the callable. The callable returns the result of a ~response~ call.
+   The function ~response~ echos its results and terminates the script.
+
+*** POST
+    #+begin_src php
+      $create_person = function() {
+          if (request()->is_missing('name')) {
+              return response(400)(['error' => 'Missing arguments']);
+          }
+
+          $name = request()->input['name'];
+
+          return response(200)(['message' => "Created new person with name {$name}"]);
+      };
+
+      route('POST')('/person', $create_person);
+    #+end_src
+
+    This section sets up a =POST= request. The callable tests the request to
+    make sure the field =name= is in the request. If it is missing, it sends
+    a 400 HTTP response code along with a JSON message representing the error:
+
+    #+begin_src json
+      {
+          "error": "Missing arguments."
+      }
+    #+end_src
+
+    If the =name= property is in the request, it uses that value to create its
+    response. This example is contrived in that it only displays JSON with the
+    name supplied, normally we would perform our work here and send a response
+    with useful information.
+
+*** PUT
+    #+begin_src php
+      $update_person = fn($id) => response(200)(['message' => "Updated person with id: {$id}"]);
+
+      route('PUT')('/person/{id}', $update_person);
+    #+end_src
+
+    In this example we are using a =PUT= request. This example is the first
+    where we are using a =Variable Path=. The callable curried to the route
+    function *must* have a parameter for the variable described in the path
+    in order to use it.
+
