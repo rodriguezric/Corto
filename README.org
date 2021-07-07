@@ -148,7 +148,7 @@
 
   #+begin_src json
     {
-        "error": "Expcetion thrown."
+        "error": "Exception thrown."
     }
   #+end_src
 
